@@ -1,18 +1,8 @@
-#
-# datablock.py
-#
-#  Copyright (C) 2013 Diamond Light Source
-#
-#  Author: James Parkhurst
-#
-#  This code is distributed under the BSD license, a copy of which is
-#  included in the root directory of this package.
+from __future__ import absolute_import, division, print_function
 
-from __future__ import absolute_import, division
 import cPickle as pickle
 
 from libtbx.utils import Sorry
-
 
 class DataBlock(object):
   ''' High level container for blocks of sweeps and imagesets. '''
@@ -319,7 +309,7 @@ class FormatChecker(object):
         self._format_class = Registry.find(filename)
       self._format_class = self.check_child_formats(filename)
       if self._verbose:
-        print 'Using %s for %s' % (self._format_class.__name__, filename)
+        print('Using %s for %s' % (self._format_class.__name__, filename))
     except Exception:
       return None
     return self._format_class
@@ -349,7 +339,7 @@ class FormatChecker(object):
         group_format = fmt
       if self._verbose:
         if fmt is not None:
-          print 'Using %s for %s' % (fmt.__name__, filename)
+          print('Using %s for %s' % (fmt.__name__, filename))
     if len(group_fnames) > 0:
       yield group_format, group_fnames
 
@@ -372,19 +362,19 @@ class DataBlockTemplateImporter(object):
       except Exception:
         self.datablocks.append(DataBlock([iset]))
       if verbose:
-        print 'Added imageset to datablock %d' % (len(self.datablocks) - 1)
+        print('Added imageset to datablock %d' % (len(self.datablocks) - 1))
 
     # For each template do an import
     for template in templates:
       template = normpath(template)
       paths = sorted(locate_files_matching_template_string(template))
       if verbose:
-        print 'The following files matched the template string:'
+        print('The following files matched the template string:')
         if len(paths) > 0:
           for p in paths:
-            print ' %s' % p
+            print(' %s' % p)
         else:
-          print ' No files found'
+          print(' No files found')
 
       # Check if we've matched any filenames
       if len(paths) == 0:
@@ -471,7 +461,7 @@ class DataBlockFilenameImporter(object):
       except Exception:
         self.datablocks.append(DataBlock([iset]))
       if verbose:
-        print 'Added imageset to datablock %d' % (len(self.datablocks) - 1)
+        print('Added imageset to datablock %d' % (len(self.datablocks) - 1))
 
     # Iterate through groups of files by format class
     find_format = FormatChecker(verbose=verbose)
@@ -483,7 +473,7 @@ class DataBlockFilenameImporter(object):
           imageset = self._create_single_file_imageset(fmt, filename,
                                                        format_kwargs=format_kwargs)
           append_to_datablocks(imageset)
-          if verbose: print 'Loaded file: %s' % filename
+          if verbose: print('Loaded file: %s' % filename)
       else:
         records = self._extract_file_metadata(
           fmt,
@@ -915,7 +905,7 @@ class DataBlockFactory(object):
     for filename in unhandled1:
       try:
         datablocks.extend(DataBlockFactory.from_serialized_format(filename))
-        if verbose: print 'Loaded datablocks(s) from %s' % filename
+        if verbose: print('Loaded datablocks(s) from %s' % filename)
       except Exception:
         unhandled.append(filename)
 
@@ -943,10 +933,10 @@ class DataBlockFactory(object):
         subdir = sorted(join(f, sf) for sf in listdir(f) if isfile(join(f, sf)))
         filelist.extend(subdir)
         if verbose:
-          print "Added %d files from %s" % (len(subdir), f)
+          print("Added %d files from %s" % (len(subdir), f))
       else:
         if verbose:
-          print "Could not import %s: not a valid file or directory name" % f
+          print("Could not import %s: not a valid file or directory name" % f)
         if unhandled is not None:
           unhandled.append(f)
 
