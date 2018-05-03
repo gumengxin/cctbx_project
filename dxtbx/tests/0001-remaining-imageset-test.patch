@@ -1,0 +1,880 @@
+From 80894f2dc90524c9eda6da479384bd3b7cabb8df Mon Sep 17 00:00:00 2001
+From: Markus Gerstel <markus.gerstel@diamond.ac.uk>
+Date: Thu, 3 May 2018 08:34:57 +0100
+Subject: [PATCH] final patch
+
+---
+ dxtbx/tests/tst_imageset.py |  649 +++++++++++++++++--------------------------
+ 1 files changed, 261 insertions(+), 388 deletions(-)
+
+diff --git a/dxtbx/tests/tst_imageset.py b/dxtbx/tests/tst_imageset.py
+index a2b9cd2..e21b527 100644
+--- a/dxtbx/tests/tst_imageset.py
++++ b/dxtbx/tests/tst_imageset.py
+@@ -1,12 +1,13 @@
+-from __future__ import division
++from __future__ import absolute_import, division, print_function
++
++import cPickle as pickle
++import glob
++import os
+ 
+ import libtbx.load_env
+ import pytest
+ 
+-class TestFormat(object):
+-
+-  def get_images(self):
+-    images = [
++@pytest.mark.parametrize("image", [
+       "./image_examples/ALS_501/als501_q4_1_001.img",
+       "./image_examples/SPring8_BL26B1_SaturnA200/A200_000001.img",
+       "./image_examples/SPring8_BL26B1_SaturnA200/A200_000002.img",
+@@ -75,227 +76,191 @@ class TestFormat(object):
+        "./image_examples/SLS_X06SA/pilatus6m_1_00001.cbf",
+        "./image_examples/SPring8_ADSC_SN916/Xtal17-2phi_3_015.cbf",
+        "./image_examples/DLS_I19/I19_P300k_00001.cbf",
+-       "./image_examples/ED_From_TIFF/170112330001.cbf"
+-    ]
+-
+-    from os.path import join
++       "./image_examples/ED_From_TIFF/170112330001.cbf",
++])
++def test_format(dials_regression, image):
++  from dxtbx.format.Registry import Registry
+ 
+-    images = map(lambda f: join(dials_regression, f), images)
++  db_fail_count = 0
++  print(image)
++  image = os.path.join(dials_regression, *(image.split('/')))
++  format_class = Registry.find(image)
++  reader = format_class.get_reader()([image])
++  masker = format_class.get_masker()([image])
+ 
+-    return images
++  N = len(reader)
+ 
+-  def run(self):
+-    from dxtbx.format.Registry import Registry
++  for i in range(N):
++    data = reader.read(i)
++    mask = masker.get(i)
+ 
+-    db_fail_count = 0
+-    for image in self.get_images():
+-      print image
+-      format_class = Registry.find(image)
+-      reader = format_class.get_reader()([image])
+-      masker = format_class.get_masker()([image])
++  iset = format_class.get_imageset([image])
+ 
+-      N = len(reader)
+ 
+-      for i in range(N):
+-        data = reader.read(i)
+-        mask = masker.get(i)
++def test_image_tile():
++  from dxtbx.format.image import ImageTileInt
++  from scitbx.array_family import flex
+ 
+-      iset = format_class.get_imageset([image])
++  data = flex.int(flex.grid(10, 10))
++  name = "TileName"
+ 
++  tile = ImageTileInt(data, name)
+ 
+-class TestImageTile(object):
++  assert tile.data().all_eq(data)
++  assert tile.name() == name
++  assert tile.empty() is False
+ 
+-  def run(self):
+ 
+-    from dxtbx.format.image import ImageTileInt
+-    from scitbx.array_family import flex
++def test_image():
++  import dxtbx.format.image
++  from scitbx.array_family import flex
+ 
++  data = flex.int(flex.grid(10, 10))
++  name = "TileName0"
++  tile0 = dxtbx.format.image.ImageTileInt(data, name)
++  image = dxtbx.format.image.ImageInt(tile0)
++  for i in range(1, 4):
+     data = flex.int(flex.grid(10, 10))
+-    name = "TileName"
++    name = "TileName%d" % i
++    tile = dxtbx.format.image.ImageTileInt(data, name)
++    image.append(tile)
+ 
+-    tile = ImageTileInt(data, name)
++  assert image.n_tiles() == 4
++  for i in range(image.n_tiles()):
++    tile = image.tile(i)
++    assert tile.name() == "TileName%d" % i
+ 
+-    assert tile.data().all_eq(data)
+-    assert tile.name() == name
+-    assert tile.empty() == False
+ 
+-class TestImage(object):
++def test_image_buffer():
++  import dxtbx.format.image
++  from scitbx.array_family import flex
+ 
+-  def run(self):
+-    from dxtbx.format.image import ImageTileInt
+-    from dxtbx.format.image import ImageInt
+-    from scitbx.array_family import flex
++  data = flex.int(flex.grid(10, 10))
++  name = "TileName0"
++  tile0 = dxtbx.format.image.ImageTileInt(data, name)
++  image = dxtbx.format.image.ImageInt(tile0)
+ 
++  b = dxtbx.format.image.ImageBuffer(image)
++  assert b.is_int() is True
++  assert b.is_double() is False
++  assert b.is_empty() is False
+ 
+-    data = flex.int(flex.grid(10, 10))
+-    name = "TileName0"
+-    tile0 = ImageTileInt(data, name)
+-    image = ImageInt(tile0)
+-    for i in range(1, 4):
+-      data = flex.int(flex.grid(10, 10))
+-      name = "TileName%d" % i
+-      tile = ImageTileInt(data, name)
+-      image.append(tile)
+-
+-    assert image.n_tiles() == 4
+-    for i in range(image.n_tiles()):
+-      tile = image.tile(i)
+-      assert tile.name() == "TileName%d" % i
+ 
++def test_external_lookup():
++  import dxtbx.format.image
++  from dxtbx.imageset import ExternalLookup
++  from scitbx.array_family import flex
+ 
+-class TestImageBuffer(object):
++  mask = flex.bool(flex.grid(10, 10), True)
++  gain = flex.double(flex.grid(10, 10), 1)
++  pedestal = flex.double(flex.grid(10, 10), 2)
+ 
+-  def run(self):
+-    from dxtbx.format.image import ImageTileInt
+-    from dxtbx.format.image import ImageInt
+-    from dxtbx.format.image import ImageBuffer
+-    from scitbx.array_family import flex
+-
+-    data = flex.int(flex.grid(10, 10))
+-    name = "TileName0"
+-    tile0 = ImageTileInt(data, name)
+-    image = ImageInt(tile0)
++  lookup = ExternalLookup()
++  lookup.mask.data = dxtbx.format.image.ImageBool(dxtbx.format.image.ImageTileBool(mask))
++  lookup.gain.data = dxtbx.format.image.ImageDouble(dxtbx.format.image.ImageTileDouble(gain))
++  lookup.pedestal.data = dxtbx.format.image.ImageDouble(dxtbx.format.image.ImageTileDouble(pedestal))
+ 
+-    b = ImageBuffer(image)
+-    assert b.is_int() == True
+-    assert b.is_double() == False
+-    assert b.is_empty() == False
++  mask2 = lookup.mask.data.tile(0).data()
++  gain2 = lookup.gain.data.tile(0).data()
++  pedestal2 = lookup.pedestal.data.tile(0).data()
+ 
++  assert mask2.all_eq(mask)
++  assert gain2.all_eq(gain)
++  assert pedestal2.all_eq(pedestal)
+ 
+-class TestExternalLookup(object):
+ 
+-  def run(self):
+-    from dxtbx.imageset import ExternalLookup
+-    from dxtbx.format.image import ImageTileBool
+-    from dxtbx.format.image import ImageTileDouble
+-    from dxtbx.format.image import ImageBool
+-    from dxtbx.format.image import ImageDouble
+-    from scitbx.array_family import flex
++def test_imagesetdata(dials_regression):
++  from dxtbx.imageset import ImageSetData
++  from dxtbx.format.image import ImageBool, ImageTileBool, ImageDouble, ImageTileDouble
++  from scitbx.array_family import flex
++  from dxtbx.format.FormatCBFMiniPilatus import FormatCBFMiniPilatus as FormatClass
+ 
+-    mask = flex.bool(flex.grid(10, 10), True)
+-    gain = flex.double(flex.grid(10, 10), 1)
+-    pedestal = flex.double(flex.grid(10, 10), 2)
++  filenames = sorted(glob.glob(os.path.join(dials_regression, "centroid_test_data", "*.cbf")))
+ 
+-    lookup = ExternalLookup()
+-    lookup.mask.data = ImageBool(ImageTileBool(mask))
+-    lookup.gain.data = ImageDouble(ImageTileDouble(gain))
+-    lookup.pedestal.data = ImageDouble(ImageTileDouble(pedestal))
++  ReaderClass = FormatClass.get_reader()
++  MaskerClass = FormatClass.get_masker()
+ 
+-    mask2 = lookup.mask.data.tile(0).data()
+-    gain2 = lookup.gain.data.tile(0).data()
+-    pedestal2 = lookup.pedestal.data.tile(0).data()
++  reader = ReaderClass(filenames)
++  masker = MaskerClass(filenames)
+ 
+-    assert mask2.all_eq(mask)
+-    assert gain2.all_eq(gain)
+-    assert pedestal2.all_eq(pedestal)
++  handle = ImageSetData(reader, masker)
+ 
++  data = handle.get_data(0).as_int().tile(0).data()
++  mask = handle.get_mask(0).tile(0).data()
+ 
+-class TestImageSetData(object):
++  assert handle.has_single_file_reader() is False
+ 
+-  def run(self):
++  path = handle.get_path(0)
++  assert path == filenames[0]
+ 
+-    from dxtbx.imageset import ImageSetData
+-    from dxtbx.format.image import ImageTileBool
+-    from dxtbx.format.image import ImageTileDouble
+-    from dxtbx.format.image import ImageBool
+-    from dxtbx.format.image import ImageDouble
+-    from scitbx.array_family import flex
+-    import os.path
+-    from glob import glob
+-    from dxtbx.format.FormatCBFMiniPilatus import FormatCBFMiniPilatus as FormatClass
+-    from os.path import join
++  master_path = handle.get_master_path()
++  assert master_path == ""
+ 
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    filenames = sorted(glob(join(dials_regression, "centroid_test_data", "*.cbf")))
++  identifier = handle.get_image_identifier(0)
++  assert identifier == filenames[0]
+ 
+-    ReaderClass = FormatClass.get_reader()
+-    MaskerClass = FormatClass.get_masker()
++  beam = FormatClass(filenames[0]).get_beam()
++  detector = FormatClass(filenames[0]).get_detector()
++  goniometer = FormatClass(filenames[0]).get_goniometer()
++  scan = FormatClass(filenames[0]).get_scan()
+ 
+-    reader = ReaderClass(filenames)
+-    masker = MaskerClass(filenames)
++  handle.set_beam(beam, 0)
++  handle.set_detector(detector, 0)
++  handle.set_goniometer(goniometer, 0)
++  handle.set_scan(scan, 0)
+ 
+-    handle = ImageSetData(reader, masker)
++  beam2 = handle.get_beam(0)
++  detector2 = handle.get_detector(0)
++  goniometer2 = handle.get_goniometer(0)
++  scan2 = handle.get_scan(0)
+ 
+-    data = handle.get_data(0).as_int().tile(0).data()
+-    mask = handle.get_mask(0).tile(0).data()
++  assert beam2 == beam
++  assert detector2 == detector
++  assert goniometer2 == goniometer
++  assert scan2 == scan
+ 
+-    assert handle.has_single_file_reader() == False
++  mask = flex.bool(flex.grid(10, 10), True)
++  gain = flex.double(flex.grid(10, 10), 1)
++  pedestal = flex.double(flex.grid(10, 10), 2)
+ 
+-    path = handle.get_path(0)
+-    assert path == filenames[0]
++  handle.external_lookup.mask.data = ImageBool(ImageTileBool(mask))
++  handle.external_lookup.gain.data = ImageDouble(ImageTileDouble(gain))
++  handle.external_lookup.pedestal.data = ImageDouble(ImageTileDouble(pedestal))
+ 
+-    master_path = handle.get_master_path()
+-    assert master_path == ""
++  mask2 = handle.external_lookup.mask.data.tile(0).data()
++  gain2 = handle.external_lookup.gain.data.tile(0).data()
++  pedestal2 = handle.external_lookup.pedestal.data.tile(0).data()
+ 
+-    identifier = handle.get_image_identifier(0)
+-    assert identifier == filenames[0]
++  assert mask2.all_eq(mask)
++  assert gain2.all_eq(gain)
++  assert pedestal2.all_eq(pedestal)
+ 
+-    beam = FormatClass(filenames[0]).get_beam()
+-    detector = FormatClass(filenames[0]).get_detector()
+-    goniometer = FormatClass(filenames[0]).get_goniometer()
+-    scan = FormatClass(filenames[0]).get_scan()
++@pytest.fixture(scope="session")
++def centroid_files(dials_regression):
++  return [
++      os.path.join(dials_regression, 'centroid_test_data', 'centroid_%04d.cbf' % i)
++      for i in range(1, 10)
++  ]
+ 
+-    handle.set_beam(beam, 0)
+-    handle.set_detector(detector, 0)
+-    handle.set_goniometer(goniometer, 0)
+-    handle.set_scan(scan, 0)
+-
+-    beam2 = handle.get_beam(0)
+-    detector2 = handle.get_detector(0)
+-    goniometer2 = handle.get_goniometer(0)
+-    scan2 = handle.get_scan(0)
+-
+-    assert beam2 == beam
+-    assert detector2 == detector
+-    assert goniometer2 == goniometer
+-    assert scan2 == scan
+-
+-    mask = flex.bool(flex.grid(10, 10), True)
+-    gain = flex.double(flex.grid(10, 10), 1)
+-    pedestal = flex.double(flex.grid(10, 10), 2)
++@pytest.fixture
++def centroid_files_and_imageset(centroid_files):
++  from dxtbx.format.Registry import Registry
+ 
+-    handle.external_lookup.mask.data = ImageBool(ImageTileBool(mask))
+-    handle.external_lookup.gain.data = ImageDouble(ImageTileDouble(gain))
+-    handle.external_lookup.pedestal.data = ImageDouble(ImageTileDouble(pedestal))
++  # Create the format class
++  format_class = Registry.find(centroid_files[0])
+ 
+-    mask2 = handle.external_lookup.mask.data.tile(0).data()
+-    gain2 = handle.external_lookup.gain.data.tile(0).data()
+-    pedestal2 = handle.external_lookup.pedestal.data.tile(0).data()
++  # Create the reader
++  imageset = format_class.get_imageset(centroid_files, as_imageset=True)
+ 
+-    assert mask2.all_eq(mask)
+-    assert gain2.all_eq(gain)
+-    assert pedestal2.all_eq(pedestal)
++  return centroid_files, imageset
+ 
+ class TestImageSet(object):
+-  def get_file_list(self):
+-    import os.path
+-
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    path = os.path.join(dials_regression, 'centroid_test_data')
+-
+-    # Non-sequential Filenames and image indices
+-    filenames = []
+-    image_indices = range(1, 10)
+-    for i in image_indices:
+-      filenames.append(os.path.join(path, 'centroid_000{0}.cbf'.format(i)))
+-
+-    return filenames
+-
+-  def run(self):
+-    from dxtbx.format.Registry import Registry
+-
+-    # Get the filenames
+-    filenames = self.get_file_list()
+-
+-    # Create the format class
+-    format_class = Registry.find(filenames[0])
+-
+-    # Create the reader
+-    imageset = format_class.get_imageset(filenames, as_imageset=True)
++  def test_imageset(self, centroid_files_and_imageset):
++    filenames, imageset = centroid_files_and_imageset
+ 
+     # Run a load of tests
+     self.tst_get_item(imageset)
+-    self.tst_len(imageset, len(filenames))
++    assert len(imageset) == len(filenames)
+     self.tst_iter(imageset)
+     self.tst_paths(imageset, filenames)
+     self.tst_get_detectorbase(imageset, range(len(filenames)), 9)
+@@ -311,7 +276,7 @@ class TestImageSet(object):
+     with pytest.raises(Exception):
+       image = imageset2[5]
+ 
+-    self.tst_len(imageset2, 4)
++    assert len(imageset2) == 4
+     self.tst_get_detectorbase(imageset2, range(0, 4), 5)
+     self.tst_get_models(imageset2, range(0, 4), 5)
+     self.tst_paths(imageset2, imageset.paths()[3:7])
+@@ -322,25 +287,25 @@ class TestImageSet(object):
+     with pytest.raises(Exception):
+       image = imageset2[2]
+ 
+-    self.tst_len(imageset2, 2)
++    assert len(imageset2) == 2
+     self.tst_get_detectorbase(imageset2, range(0, 2), 2)
+     self.tst_get_models(imageset2, range(0, 2), 2)
+     self.tst_paths(imageset2, imageset.paths()[3:5])
+     self.tst_iter(imageset2)
+ 
+-  def tst_len(self, imageset, length):
+-    assert(len(imageset) == length)
+-
+-  def tst_iter(self, imageset):
++  @staticmethod
++  def tst_iter(imageset):
+     for image in imageset:
+       pass
+ 
+-  def tst_paths(self, imageset, filenames1):
++  @staticmethod
++  def tst_paths(imageset, filenames1):
+     filenames2 = imageset.paths()
+     for f1, f2 in zip(filenames1, filenames2):
+       assert(f1 == f2)
+ 
+-  def tst_get_detectorbase(self, imageset, indices, outside_index):
++  @staticmethod
++  def tst_get_detectorbase(imageset, indices, outside_index):
+     for i in indices:
+       imageset.get_detectorbase(i)
+ 
+@@ -354,11 +319,13 @@ class TestImageSet(object):
+     with pytest.raises(Exception):
+       self.tst_get_models_index(imageset, outside_index)
+ 
+-  def tst_get_models_index(self, imageset, index=None):
++  @staticmethod
++  def tst_get_models_index(imageset, index=None):
+     imageset.get_detector(index)
+     imageset.get_beam(index)
+ 
+-  def tst_set_models(self, imageset):
++  @staticmethod
++  def tst_set_models(imageset):
+     from dxtbx.model import Beam, Detector, Panel
+ 
+     # Create some other models
+@@ -378,51 +345,34 @@ class TestImageSet(object):
+     # Get the models back and check they're ok
+     beam2 = imageset.get_beam()
+     detector2 = imageset.get_detector()
+-    assert(beam2 == beam)
+-    assert(detector2 == detector)
++    assert beam2 == beam
++    assert detector2 == detector
+ 
+     # Get the models from an index back and check they're not the same
+     beam2 = imageset.get_beam(0)
+     detector2 = imageset.get_detector(0)
+-    assert(beam2 != beam)
+-    assert(detector2 != detector)
++    assert beam2 != beam
++    assert detector2 != detector
+ 
+ 
+ class TestImageSweep(object):
+-  def get_file_list(self):
+-    import os.path
+-
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    path = os.path.join(dials_regression, 'centroid_test_data')
+-
+-    # Non-sequential Filenames and image indices
+-    template = os.path.join(path, 'centroid_%04d.cbf')
+-    array_range = (0, 9)
+-
+-    filenames = [template % (i+1) for i in range(*array_range)]
+-
+-    return filenames
+-
+-  def run(self):
++  def test(self, centroid_files):
+     from dxtbx.imageset import ImageSweep
+     from dxtbx.format.Registry import Registry
+ 
+-    # Get the filenames
+-    filenames = self.get_file_list()
+-
+     # Create the format class
+-    format_class = Registry.find(filenames[0])
++    format_class = Registry.find(centroid_files[0])
+ 
+     # Create the sweep
+-    sweep = format_class.get_imageset(filenames)
++    sweep = format_class.get_imageset(centroid_files)
+ 
+     # Run a load of tests
+     self.tst_get_item(sweep)
+-    self.tst_len(sweep, len(filenames))
++    assert len(sweep) == len(centroid_files)
+     self.tst_iter(sweep)
+-    self.tst_paths(sweep, filenames)
+-    self.tst_get_detectorbase(sweep, range(len(filenames)), 9)
+-    self.tst_get_models(sweep, range(len(filenames)), 9)
++    self.tst_paths(sweep, centroid_files)
++    self.tst_get_detectorbase(sweep, range(len(centroid_files)), 9)
++    self.tst_get_models(sweep, range(len(centroid_files)), 9)
+     self.tst_get_array_range(sweep, (0, 9))
+     self.tst_set_models(sweep)
+ 
+@@ -436,7 +386,7 @@ class TestImageSweep(object):
+     with pytest.raises(Exception):
+       image = sweep2[5]
+ 
+-    self.tst_len(sweep2, 4)
++    assert len(sweep2) == 4
+     self.tst_get_detectorbase(sweep2, range(0, 4), 5)
+     self.tst_get_models(sweep2, range(0, 4), 5)
+     self.tst_paths(sweep2, sweep.paths()[3:7])
+@@ -446,20 +396,19 @@ class TestImageSweep(object):
+     with pytest.raises(IndexError):
+       sweep2 = sweep[3:7:2]
+ 
+-  def tst_len(self, sweep, length):
+-    assert(len(sweep) == length)
+-
+-  def tst_iter(self, sweep):
++  @staticmethod
++  def tst_iter(sweep):
+     for image in sweep:
+       pass
+ 
+-  def tst_paths(self, sweep, filenames1):
++  @staticmethod
++  def tst_paths(sweep, filenames1):
+     filenames2 = sweep.paths()
+     for f1, f2 in zip(filenames1, filenames2):
+-      assert(f1 == f2)
+-
++      assert f1 == f2
+ 
+-  def tst_get_detectorbase(self, sweep, indices, outside_index):
++  @staticmethod
++  def tst_get_detectorbase(sweep, indices, outside_index):
+     for i in indices:
+       sweep.get_detectorbase(i)
+ 
+@@ -471,7 +420,8 @@ class TestImageSweep(object):
+     for i in indices:
+       self.tst_get_models_index(sweep, i)
+ 
+-  def tst_get_models_index(self, sweep, index=None):
++  @staticmethod
++  def tst_get_models_index(sweep, index=None):
+     if index is not None:
+       sweep.get_detector(index)
+       sweep.get_beam(index)
+@@ -489,12 +439,14 @@ class TestImageSweep(object):
+     # Put sweep to end
+     sweep[len(sweep)-1]
+     scan2 = sweep.get_scan()
+-    assert(scan1 == scan2)
++    assert scan1 == scan2
+ 
+-  def tst_get_array_range(self, sweep, array_range):
+-    assert(sweep.get_array_range() == array_range)
++  @staticmethod
++  def tst_get_array_range(sweep, array_range):
++    assert sweep.get_array_range() == array_range
+ 
+-  def tst_set_models(self, sweep):
++  @staticmethod
++  def tst_set_models(sweep):
+     from dxtbx.model import Beam, Detector, Panel
+ 
+     # Get some models
+@@ -521,17 +473,17 @@ class TestImageSweep(object):
+     beam2 = sweep.get_beam()
+     gonio2 = sweep.get_goniometer()
+     detector2 = sweep.get_detector()
+-    assert(beam2 == beam)
+-    assert(gonio2 == gonio)
+-    assert(detector2 == detector)
++    assert beam2 == beam
++    assert gonio2 == gonio
++    assert detector2 == detector
+ 
+     # Get the models from an index back and check they're the same
+     beam2 = sweep.get_beam(0)
+     gonio2 = sweep.get_goniometer(0)
+     detector2 = sweep.get_detector(0)
+-    assert(beam2 == beam)
+-    assert(gonio2 == gonio)
+-    assert(detector2 == detector)
++    assert beam2 == beam
++    assert gonio2 == gonio
++    assert detector2 == detector
+ 
+     # Get a sub sweep
+     sub_sweep = sweep[3:7]
+@@ -540,60 +492,53 @@ class TestImageSweep(object):
+     beam2 = sub_sweep.get_beam()
+     gonio2 = sub_sweep.get_goniometer()
+     detector2 = sub_sweep.get_detector()
+-    assert(beam2 == beam)
+-    assert(gonio2 == gonio)
+-    assert(detector2 == detector)
++    assert beam2 == beam
++    assert gonio2 == gonio
++    assert detector2 == detector
+ 
+     # Get the models from an index back and check they're not the same
+     beam2 = sub_sweep.get_beam(0)
+     gonio2 = sub_sweep.get_goniometer(0)
+     detector2 = sub_sweep.get_detector(0)
+-    assert(beam2 == beam)
+-    assert(gonio2 == gonio)
+-    assert(detector2 == detector)
+-
+-# This test is broken since the master h5 file is inconsistent with NeXus format after commit dbb0bf7
+-# FIXME
+-class TestNexusFile(object):
+-
+-  def __init__(self):
+-    from os.path import join
+-    self.filename = join(dials_regression,
+-                    "./image_examples/LCLS_cspad_nexus/cxi78513_bslz4_r0014_subset4_master.h5")
+-
+-  def run(self):
+-
+-    from dxtbx.format.Registry import Registry
+-    format_class = Registry.find(self.filename)
++    assert beam2 == beam
++    assert gonio2 == gonio
++    assert detector2 == detector
+ 
+-    iset = format_class.get_imageset([self.filename])
++@pytest.mark.xfail(reason="This test is broken since the master h5 file is inconsistent with NeXus format after commit dbb0bf7")
++def test_nexus_file(dials_regression):
++  filename = os.path.join(dials_regression,
++      "image_examples", "LCLS_cspad_nexus", "cxi78513_bslz4_r0014_subset4_master.h5")
+ 
+-    assert len(iset) == 2
+-    for i in range(len(iset)):
+-      data = iset.get_raw_data(i)
+-      mask = iset.get_mask(i)
+-      b = iset.get_beam(i)
+-      d = iset.get_detector(i)
+-      g = iset.get_goniometer(i)
+-      s = iset.get_scan(i)
++  from dxtbx.format.Registry import Registry
++  format_class = Registry.find(filename)
+ 
+-    iset = format_class.get_imageset([self.filename], single_file_indices=[1])
+-    assert len(iset) == 1
++  iset = format_class.get_imageset([filename])
+ 
+-    for i in range(len(iset)):
+-      data = iset.get_raw_data(i)
+-      mask = iset.get_mask(i)
+-      b = iset.get_beam(i)
+-      d = iset.get_detector(i)
+-      g = iset.get_goniometer(i)
+-      s = iset.get_scan(i)
++  assert len(iset) == 2
++  for i in range(len(iset)):
++    data = iset.get_raw_data(i)
++    mask = iset.get_mask(i)
++    b = iset.get_beam(i)
++    d = iset.get_detector(i)
++    g = iset.get_goniometer(i)
++    s = iset.get_scan(i)
++
++  iset = format_class.get_imageset([filename], single_file_indices=[1])
++  assert len(iset) == 1
+ 
+-def test_SACLA_MPCCD_Cheetah_File(lazy=False):
++  for i in range(len(iset)):
++    data = iset.get_raw_data(i)
++    mask = iset.get_mask(i)
++    b = iset.get_beam(i)
++    d = iset.get_detector(i)
++    g = iset.get_goniometer(i)
++    s = iset.get_scan(i)
+ 
+-  from os.path import join
+-  filename = join(dials_regression,
+-                    "./image_examples/SACLA_MPCCD_Cheetah/run266702-0-subset.h5")
+ 
++@pytest.mark.parametrize("lazy", (True, False))
++def test_SACLA_MPCCD_Cheetah_File(dials_regression, lazy):
++  filename = os.path.join(dials_regression,
++      "image_examples", "SACLA_MPCCD_Cheetah", "run266702-0-subset.h5")
+ 
+   from dxtbx.format.Registry import Registry
+   format_class = Registry.find(filename)
+@@ -620,134 +565,62 @@ def test_SACLA_MPCCD_Cheetah_File(lazy=False):
+     assert iset.get_goniometer(i) is None
+     assert iset.get_scan(i) is None
+ 
+-class TestImageSetFactory(object):
+-  def get_file_list(self):
+-    import os.path
+-
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    path = os.path.join(dials_regression, 'centroid_test_data')
+-
+-    # Non-sequential Filenames and image indices
+-    filenames = []
+-    image_indices = range(1, 10)
+-    for i in image_indices:
+-      filenames.append(os.path.join(path, 'centroid_000{0}.cbf'.format(i)))
+-
+-    return filenames
+-
+-  def run(self):
+-    from dxtbx.imageset import ImageSetFactory, ImageSweep
+-    from os.path import join
+-
+-    filenames = self.get_file_list()
+-
+-    sweep = ImageSetFactory.new(filenames)
+-
+-    assert(isinstance(sweep[0], ImageSweep) == True)
+-
+-    template = join(dials_regression, "centroid_test_data", "centroid_####.cbf")
+-    image_range = (3, 6)
+-
+-    sweep = ImageSetFactory.from_template(template, image_range)
+-
+-    assert(isinstance(sweep[0], ImageSweep) == True)
+-    assert len(sweep[0]) == 4
+-    assert sweep[0].paths()[0].endswith("3.cbf")
+-    assert sweep[0].paths()[-1].endswith("6.cbf")
+-
+-    imageset = ImageSetFactory.make_imageset(filenames)
+-    assert len(imageset) == 9
+-
+-    imageset = ImageSetFactory.make_imageset(
+-      filenames,
+-      check_format=False)
+-    assert len(imageset) == 9
+-
+-    sweep = ImageSetFactory.make_sweep(
+-      template,
+-      list(range(1, 9+1)))
+-    assert len(sweep) == 9
++def test_imagesetfactory(centroid_files, dials_regression):
++  from dxtbx.imageset import ImageSetFactory, ImageSweep
+ 
+-    sweep = ImageSetFactory.make_sweep(
+-      template,
+-      list(range(3, 6+1)))
+-    assert len(sweep) == 4
++  filenames = centroid_files
+ 
++  sweep = ImageSetFactory.new(filenames)
+ 
+-class TestPickleImageSet(object):
++  assert isinstance(sweep[0], ImageSweep)
+ 
+-  def __init__(self):
+-    import os.path
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    path = os.path.join(dials_regression, 'centroid_test_data')
++  template = os.path.join(dials_regression, "centroid_test_data", "centroid_####.cbf")
++  image_range = (3, 6)
+ 
+-    # Non-sequential Filenames and image indices
+-    filenames = []
+-    image_indices = range(1, 10)
+-    for i in image_indices:
+-      filenames.append(os.path.join(path, 'centroid_000{0}.cbf'.format(i)))
++  sweep = ImageSetFactory.from_template(template, image_range)
+ 
+-    from dxtbx.imageset import ImageSetFactory, ImageSweep
+-    self.sweep = ImageSetFactory.new(filenames)[0]
++  assert isinstance(sweep[0], ImageSweep)
++  assert len(sweep[0]) == 4
++  assert sweep[0].paths()[0].endswith("3.cbf")
++  assert sweep[0].paths()[-1].endswith("6.cbf")
+ 
+-  def pickle_then_unpickle(self, obj):
+-    '''Pickle to a temp file then un-pickle.'''
+-    import cPickle as pickle
+-    import cStringIO
++  imageset = ImageSetFactory.make_imageset(filenames)
++  assert len(imageset) == 9
+ 
+-    # Create a temporary "file"
+-    temp = cStringIO.StringIO()
++  imageset = ImageSetFactory.make_imageset(filenames, check_format=False)
++  assert len(imageset) == 9
+ 
+-    # Pickle the object
+-    pickle.dump(obj, temp)
++  sweep = ImageSetFactory.make_sweep(
++    template,
++    list(range(1, 9+1)))
++  assert len(sweep) == 9
+ 
+-    # Read the object
+-    temp.seek(0)
+-    return pickle.load(temp)
++  sweep = ImageSetFactory.make_sweep(
++    template,
++    list(range(3, 6+1)))
++  assert len(sweep) == 4
+ 
+-  def run(self):
+ 
+-    # Read the 5th image
+-    image = self.sweep[4]
++def test_pickle_imageset(centroid_files):
++  from dxtbx.imageset import ImageSetFactory, ImageSweep
++  sweep = ImageSetFactory.new(centroid_files)[0]
+ 
+-    sweep2 = self.pickle_then_unpickle(self.sweep)
++  # Read the 5th image
++  image = sweep[4]
+ 
+-    assert(self.sweep.get_template() == sweep2.get_template())
+-    assert(self.sweep.get_array_range() == sweep2.get_array_range())
+-    assert(self.sweep.get_beam() == sweep2.get_beam())
+-    assert(self.sweep.get_goniometer() == sweep2.get_goniometer())
+-    assert(self.sweep.get_scan() == sweep2.get_scan())
+-    assert(self.sweep.paths() == sweep2.paths())
+-    assert(self.sweep == sweep2)
++  # Pickle, then unpickle
++  sweep2 = pickle.loads(pickle.dumps(sweep))
+ 
+-    # Check auxiliary methods after pickling
+-    sweep3 = sweep2[0:4]
+-    sweep4 = sweep3[0:2]
+-    sweep4.get_detectorbase(0)
+-    sweep4[0]
++  assert sweep.get_template() == sweep2.get_template()
++  assert sweep.get_array_range() == sweep2.get_array_range()
++  assert sweep.get_beam() == sweep2.get_beam()
++  assert sweep.get_goniometer() == sweep2.get_goniometer()
++  assert sweep.get_scan() == sweep2.get_scan()
++  assert sweep.paths() == sweep2.paths()
++  assert sweep == sweep2
+ 
+-def run():
+-
+-  TestFormat().run()
+-  TestImageTile().run()
+-  TestImage().run()
+-  TestImageBuffer().run()
+-  TestExternalLookup().run()
+-  TestImageSetData().run()
+-  TestImageSet().run()
+-  TestImageSweep().run()
+-#  TestNexusFile().run()
+-  TestImageSetFactory().run()
+-  TestPickleImageSet().run()
+-  test_SACLA_MPCCD_Cheetah_File()
+-  test_SACLA_MPCCD_Cheetah_File(lazy=True)
+-
+-
+-if __name__ == '__main__':
+-  if not libtbx.env.has_module("dials"):
+-    print "Skipping test: dials not present"
+-  elif not libtbx.env.has_module("dials_regression"):
+-    print "Skipping test: dials_regression not present"
+-  else:
+-    dials_regression = libtbx.env.dist_path('dials_regression')
+-    run()
++  # Check auxiliary methods after pickling
++  sweep3 = sweep2[0:4]
++  sweep4 = sweep3[0:2]
++  sweep4.get_detectorbase(0)
++  sweep4[0]
+-- 
+1.7.1
+
